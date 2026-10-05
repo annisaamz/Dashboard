@@ -52,8 +52,16 @@ COLORWAY = ["#2563eb", "#f59e0b", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#
 ENV_LABELS = {
     "temperature": "Temperature (°C)", "relative_humidity": "Kelembapan (%)", "wind_speed": "Kecepatan angin",
     "pm2_5": "PM2.5 (µg/m³)", "pm10": "PM10 (µg/m³)", "nitrogen_dioxide": "NO₂ (µg/m³)",
-    "carbon_monoxide": "CO (µg/m³)", "us_aqi": "US AQI",
+    "carbon_monoxide": "CO (µg/m³)", "us_aqi": "US AQI", "precipitation": "Presipitasi (mm)",
 }
+# Kode cuaca WMO (kolom weather_code pada weather_hourly)
+WEATHER_CODES = {0: "Cerah", 1: "Cerah berawan", 2: "Berawan sebagian", 3: "Mendung", 45: "Kabut", 48: "Kabut",
+                 51: "Gerimis ringan", 53: "Gerimis sedang", 55: "Gerimis lebat", 61: "Hujan ringan",
+                 63: "Hujan sedang", 65: "Hujan lebat", 80: "Hujan lokal", 81: "Hujan lokal", 82: "Hujan lokal lebat",
+                 95: "Badai petir"}
+COND_ORDER = list(dict.fromkeys(WEATHER_CODES.values()))  # urutan cerah -> hujan
+PERIODS = ["Dini hari (00–05)", "Pagi (06–09)", "Siang (10–14)", "Sore (15–18)", "Malam (19–23)"]
+DAYS_ID = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 
 st.markdown(
     """
@@ -550,6 +558,45 @@ def agg_points(tf):
         pct_macet=("congestion_level", lambda s: (s == "MACET").mean() * 100)).reset_index()
 
 
+def weather_frame(data, include_forecast=False):
+    """weather_hourly + label kondisi cuaca. Default hanya data aktual (is_forecast = False)."""
+    wx = data.get("weather_hourly")
+    if wx is None:
+        return None
+    w = (wx if include_forecast else wx[~wx["is_forecast"]]).copy()
+    codes = w["weather_code"] if "weather_code" in w.columns else [None] * len(w)
+    w["kondisi"] = [WEATHER_CODES.get(c, f"Kode {c}") if pd.notna(c) else "Tidak diketahui" for c in codes]
+    w["sumber_cuaca"] = np.where(w["is_forecast"], "Prakiraan", "Aktual")
+    return w
+
+
+def add_calendar(df):
+    """Tambah konteks kalender dari hour_ts (WIB): periode hari, hari, hari kerja/akhir pekan, musim.
+    Musim diturunkan dari bulan (dataset tidak punya kolom musim): hujan = Nov–Mar, kemarau = Apr–Okt."""
+    df = df.copy()
+    t = df["hour_ts"]
+    df["periode"] = pd.cut(t.dt.hour, [-1, 5, 9, 14, 18, 23], labels=PERIODS).astype(str)
+    df["hari"] = t.dt.dayofweek.map(dict(enumerate(DAYS_ID)))
+    df["tipe_hari"] = np.where(t.dt.dayofweek >= 5, "Akhir pekan", "Hari kerja")
+    df["musim"] = np.where(t.dt.month.isin([11, 12, 1, 2, 3]), "Musim hujan", "Musim kemarau")
+    return df
+
+
+def group_bar(d, col, key, order=None, value="congestion_pct", label="Congestion rata-rata (%)"):
+    """Bar rata-rata `value` per kelompok `col`, dengan jumlah observasi (n) di bawahnya."""
+    if col not in d.columns or d[col].dropna().empty:
+        st.info("Data tidak tersedia.")
+        return
+    g = d.groupby(col).agg(nilai=(value, "mean"), n=(value, "size")).reset_index()
+    if order:
+        have = set(g[col])  # kategori di luar `order` (mis. "Tanpa data cuaca") tetap ditampilkan di akhir
+        g[col] = pd.Categorical(g[col], [o for o in order if o in have] + sorted(have - set(order)), ordered=True)
+        g = g.sort_values(col)
+    fig = px.bar(g, x=col, y="nilai", text_auto=".1f", hover_data={"n": True}, labels={col: "", "nilai": label})
+    pchart(fig, key)
+    st.caption("n: " + " · ".join(f"{r[col]} = {r['n']}" for _, r in g.iterrows()))
+
+
 # ----------------------------------------------------------------------------
 # SIDEBAR & FILTER
 # ----------------------------------------------------------------------------
@@ -904,7 +951,8 @@ def page_incidents(inc, tf):
 # PAGE 4 — ENVIRONMENT
 # ----------------------------------------------------------------------------
 def env_city_frame(src, tf, data, f):
-    """Frame per jam (rata-rata titik terfilter) + variabel cuaca/udara."""
+    """Frame per jam (rata-rata titik terfilter) + cuaca/udara aktual + konteks kalender (musim, periode, hari)."""
+    wx = weather_frame(data)
     if src.startswith("mart"):
         mt = data.get("mart_traffic_features")
         if mt is None:
@@ -915,21 +963,24 @@ def env_city_frame(src, tf, data, f):
         mt["delay"] = mt["avg_delay_seconds"]
         mt["speed"] = mt["avg_speed"]
         cols = ["congestion_pct", "delay", "speed"] + [c for c in ENV_LABELS if c in mt.columns] + \
-               [c for c in ["precipitation", "rain"] if c in mt.columns]
-        return mt.groupby("hour_ts")[cols].mean().reset_index()
-    hp = hourly_points(tf, f["min_s"])
-    if hp.empty:
-        return hp
-    ch = hp.groupby("hour_ts").agg(congestion_pct=("congestion_pct", "mean"), delay=("delay", "mean"),
-                                   speed=("speed", "mean")).reset_index()
-    wx, aq = data.get("weather_hourly"), data.get("air_quality_hourly")
-    if wx is not None:
-        ch = ch.merge(wx[~wx["is_forecast"]][["hour_ts", "temperature", "relative_humidity", "precipitation", "rain",
-                                              "wind_speed"]], on="hour_ts", how="left")
-    if aq is not None:
-        ch = ch.merge(aq[~aq["is_forecast"]][["hour_ts", "pm2_5", "pm10", "carbon_monoxide", "nitrogen_dioxide",
-                                              "us_aqi"]], on="hour_ts", how="left")
-    return ch
+               [c for c in ["rain"] if c in mt.columns]
+        ch = mt.groupby("hour_ts")[cols].mean().reset_index()
+        if wx is not None and not ch.empty:  # mart tidak punya weather_code -> ambil dari weather_hourly
+            ch = ch.merge(wx[["hour_ts", "kondisi"]], on="hour_ts", how="left")
+    else:
+        hp = hourly_points(tf, f["min_s"])
+        if hp.empty:
+            return hp
+        ch = hp.groupby("hour_ts").agg(congestion_pct=("congestion_pct", "mean"), delay=("delay", "mean"),
+                                       speed=("speed", "mean")).reset_index()
+        if wx is not None:
+            ch = ch.merge(wx[["hour_ts", "temperature", "relative_humidity", "precipitation", "rain", "wind_speed",
+                              "kondisi"]], on="hour_ts", how="left")
+        aq = data.get("air_quality_hourly")
+        if aq is not None:
+            ch = ch.merge(aq[~aq["is_forecast"]][["hour_ts", "pm2_5", "pm10", "carbon_monoxide", "nitrogen_dioxide",
+                                                  "us_aqi"]], on="hour_ts", how="left")
+    return ch if ch.empty else add_calendar(ch)
 
 
 def corr_table(d, cols):
@@ -969,8 +1020,8 @@ def scatter_trend(d, x, key):
 
 
 def page_environment(tf, data, f):
-    header("🌦️ Environment", "Hubungan deskriptif traffic vs cuaca/kualitas udara pada level jam. "
-           "Korelasi tidak menunjukkan sebab-akibat.", tf)
+    header("🌦️ Environment", "Hubungan deskriptif traffic vs cuaca, kualitas udara, musim, dan konteks kalender "
+           "pada level jam. Korelasi tidak menunjukkan sebab-akibat.", tf)
     src = st.radio("Sumber data traffic untuk analisis lingkungan",
                    ["traffic_flow (mengikuti semua filter)", "mart_traffic_features (filter tanggal/koridor/titik)"],
                    horizontal=True)
@@ -981,6 +1032,18 @@ def page_environment(tf, data, f):
     avail = [c for c in ENV_LABELS if c in d.columns]
     st.info(f"{len(d)} jam beririsan. Weather/AQ yang dipasangkan hanya data aktual (is_forecast = False)"
             + ("; mart tidak menandai aktual/forecast." if src.startswith("mart") else "."))
+
+    kp = [("Jam beririsan", f"{len(d):,}", "traffic × cuaca/AQ aktual")]
+    if "temperature" in d.columns:
+        kp.append(("Suhu rata-rata", fmt(d["temperature"].mean(), 1, " °C"),
+                   f"rentang {fmt(d['temperature'].min(), 0)}–{fmt(d['temperature'].max(), 0)} °C"))
+    if "kondisi" in d.columns and d["kondisi"].notna().any():
+        top = d["kondisi"].value_counts()
+        kp.append(("Kondisi dominan", top.index[0], f"{top.iloc[0]} dari {int(top.sum())} jam"))
+    kp.append(("Musim", " / ".join(sorted(d["musim"].unique())), "diturunkan dari bulan"))
+    if "precipitation" in d.columns:
+        kp.append(("Jam hujan", f"{int((d['precipitation'] > 0).sum())}", "presipitasi > 0 mm"))
+    kpi_row(kp)
 
     if {"rain", "precipitation"} <= set(d.columns):
         w = d.dropna(subset=["rain", "precipitation"])
@@ -1001,7 +1064,8 @@ def page_environment(tf, data, f):
         st.caption("Dengan n jam yang kecil, tiap jam-dalam-sehari hanya punya beberapa pengamatan sehingga korelasi "
                    "residual tidak stabil — baca sebagai indikasi awal.")
 
-    tabs = st.tabs(["Temperature", "PM2.5", "NO₂", "Indikator lain", "Pola per Jam", "Tren Weather & AQ"])
+    tabs = st.tabs(["Temperature", "PM2.5", "NO₂", "Indikator lain", "Cuaca & Kalender", "Pola per Jam",
+                    "Tren Weather & AQ"])
     with tabs[0]:
         scatter_trend(d, "temperature", "env_t") if "temperature" in d.columns else st.info("Data weather tidak tersedia.")
     with tabs[1]:
@@ -1009,11 +1073,36 @@ def page_environment(tf, data, f):
     with tabs[2]:
         scatter_trend(d, "nitrogen_dioxide", "env_no2") if "nitrogen_dioxide" in d.columns else st.info("Data air quality tidak tersedia.")
     with tabs[3]:
-        others = [c for c in ["pm10", "carbon_monoxide", "us_aqi", "relative_humidity", "wind_speed"] if c in d.columns]
+        others = [c for c in ["pm10", "carbon_monoxide", "us_aqi", "relative_humidity", "wind_speed", "precipitation"]
+                  if c in d.columns]
         if others:
             k = st.selectbox("Variabel", others, format_func=lambda x: ENV_LABELS[x])
             scatter_trend(d, k, "env_other")
     with tabs[4]:
+        st.caption("Rata-rata congestion per kelompok jam. Kelompok dengan n kecil, dan kelompok yang jamnya tidak seimbang "
+                   "(mis. satu kondisi cuaca hanya muncul di jam sibuk), tidak bisa dibaca sebagai efek cuaca/hari.")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Per kondisi cuaca (weather_code)**")
+            group_bar(d, "kondisi", "env_cond", COND_ORDER)
+        with c2:
+            st.markdown("**Per periode hari**")
+            group_bar(d, "periode", "env_per", PERIODS)
+        c3, c4 = st.columns(2)
+        with c3:
+            st.markdown("**Hari kerja vs akhir pekan**")
+            group_bar(d, "tipe_hari", "env_wk")
+        with c4:
+            st.markdown("**Per hari**")
+            group_bar(d, "hari", "env_day", DAYS_ID)
+        if d["musim"].nunique() > 1:
+            st.markdown("**Per musim**")
+            group_bar(d, "musim", "env_season")
+        else:
+            st.info(f"Seluruh jam beririsan berada pada satu musim ({d['musim'].iloc[0]}; rentang "
+                    f"{d['hour_ts'].min():%d %b} – {d['hour_ts'].max():%d %b %Y}). Perbandingan antar musim baru bisa "
+                    "dilakukan setelah data mencakup bulan di musim lain.")
+    with tabs[5]:
         if avail:
             k = st.selectbox("Bandingkan congestion dengan", avail, format_func=lambda x: ENV_LABELS[x], key="env_prof")
             dd = d.assign(hod=d["hour_ts"].dt.hour).groupby("hod")[["congestion_pct", k]].mean().reset_index()
@@ -1025,7 +1114,7 @@ def page_environment(tf, data, f):
                               yaxis2=dict(title=ENV_LABELS[k], overlaying="y", side="right"),
                               legend=dict(orientation="h", y=1.12))
             pchart(fig, "env_hod")
-    with tabs[5]:
+    with tabs[6]:
         aq, wx = data.get("air_quality_hourly"), data.get("weather_hourly")
         if aq is not None:
             var = st.selectbox("Polutan", ["pm2_5", "pm10", "nitrogen_dioxide", "carbon_monoxide", "us_aqi"],
@@ -1123,6 +1212,22 @@ def page_forecast(tf_base, data, f):
             fig.add_scatter(x=[0, mx], y=[0, mx], mode="lines", name="y = x", line=dict(dash="dash", color="#64748b"))
             pchart(fig, "fc_scatter")
 
+        st.subheader("Error Forecast per Kondisi Cuaca & Periode Hari")
+        ev = add_calendar(ev)
+        wx = weather_frame(data)
+        if wx is not None:
+            ev = ev.merge(wx[["hour_ts", "kondisi"]], on="hour_ts", how="left")
+            ev["kondisi"] = ev["kondisi"].fillna("Tanpa data cuaca")
+        c5, c6 = st.columns(2)
+        with c5:
+            st.markdown("**MAE per kondisi cuaca (aktual)**")
+            group_bar(ev, "kondisi", "fc_cond", COND_ORDER, value="abs_error", label="MAE (pp)")
+        with c6:
+            st.markdown("**MAE per periode hari**")
+            group_bar(ev, "periode", "fc_per", PERIODS, value="abs_error", label="MAE (pp)")
+        st.caption("n = titik-jam yang dievaluasi. Kondisi cuaca ikut berubah menurut jam, sehingga selisih MAE antar "
+                   "kelompok belum tentu disebabkan cuaca.")
+
         st.subheader("Confusion Matrix Level (aktual × prediksi)")
         cm = pd.crosstab(ev["actual_level"], ev["predicted_level"]).reindex(index=LEVELS, columns=LEVELS, fill_value=0)
         fig = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
@@ -1133,7 +1238,9 @@ def page_forecast(tf_base, data, f):
     last = hp["hour_ts"].max()
     fut = fcf[fcf["hour_ts"] > last].copy()
     if fut.empty:
-        st.info(f"Tidak ada forecast setelah data aktual terakhir ({last:%d %b %H:%M} WIB).")
+        st.info(f"Tidak ada forecast setelah data aktual terakhir ({last:%d %b %H:%M} WIB). Forecast terakhir menargetkan "
+                f"{fcf['hour_ts'].max():%d %b %H:%M} WIB, jadi seluruh forecast pada filter ini sudah bisa dievaluasi di atas. "
+                "Persempit rentang tanggal di sidebar untuk melihat bagian prediksi ke depan.")
         return
     st.caption(f"Data aktual terakhir: {last:%d %b %Y %H:%M} WIB. Prediksi berasal dari model_version terbaru per titik-jam.")
     fut["jam"] = fut["hour_ts"].dt.strftime("%d %b %H:00")
@@ -1156,6 +1263,23 @@ def page_forecast(tf_base, data, f):
             ["point_id", "location", "corridor", "jam", "predicted_pct", "predicted_level", "model_version"]]
         t.columns = ["Point", "Lokasi", "Koridor", "Jam target (WIB)", "Prediksi (%)", "Level", "Versi"]
         show_df(t.round(1))
+
+    wx_all = weather_frame(data, include_forecast=True)
+    if wx_all is not None:
+        st.subheader("Prediksi Congestion vs Prakiraan Cuaca")
+        pf = fut.groupby("hour_ts")["predicted_pct"].mean().reset_index().merge(
+            wx_all[["hour_ts", "temperature", "kondisi", "sumber_cuaca"]], on="hour_ts", how="left")
+        fig = go.Figure()
+        fig.add_bar(x=pf["hour_ts"], y=pf["predicted_pct"], name="Prediksi congestion (%)", marker_color="#93c5fd")
+        fig.add_scatter(x=pf["hour_ts"], y=pf["temperature"], name="Suhu (°C)", yaxis="y2", mode="lines+markers",
+                        line=dict(color="#ef4444"))
+        fig.update_layout(xaxis_title="Waktu (WIB)", yaxis_title="Prediksi congestion (%)",
+                          yaxis2=dict(title="Suhu (°C)", overlaying="y", side="right"), legend=dict(orientation="h", y=1.12))
+        pchart(fig, "fc_future_wx")
+        kd = pf["kondisi"].value_counts()
+        st.caption("Kondisi cuaca pada jam target: " + (", ".join(f"{k} ({v} jam)" for k, v in kd.items()) or "–")
+                   + f" · sumber cuaca: {int((pf['sumber_cuaca'] == 'Aktual').sum())} jam aktual, "
+                   f"{int((pf['sumber_cuaca'] == 'Prakiraan').sum())} jam prakiraan.")
 
 
 # ----------------------------------------------------------------------------
@@ -1373,7 +1497,9 @@ def page_quality(data, meta, ignored, f):
         "4. **Weather & air quality berisi actual + forecast**; hanya data aktual dipasangkan dengan traffic.\n"
         "5. **Korelasi ≠ kausalitas**; traffic dan polusi sama-sama mengikuti pola jam, dan n jam masih kecil.\n"
         "6. **Cakupan waktu pendek**; belum ada pola mingguan/musiman dan hari parsial dapat membiaskan rata-rata harian.\n"
-        "7. **Target −15% membutuhkan baseline yang disepakati** (metrik, periode, dan jam yang sama dengan current)."
+        "7. **Target −15% membutuhkan baseline yang disepakati** (metrik, periode, dan jam yang sama dengan current).\n"
+        "8. **Musim diturunkan dari bulan** (kemarau Apr–Okt, hujan Nov–Mar) karena dataset tidak punya kolom musim; "
+        "cakupan data saat ini hanya satu musim."
     )
 
 
