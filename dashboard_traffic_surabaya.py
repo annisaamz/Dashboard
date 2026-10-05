@@ -435,25 +435,29 @@ def load_all(file_map):
         df["point_label"] = df["point_id"] + " — " + df["location"]
         return df
 
-    # --- traffic_flow (gabungan semua file; kolom waktu timestamp_utc atau observed_at)
+        # --- traffic_flow (gabungan semua file; kolom waktu timestamp_utc atau observed_at)
     parts = []
     for d in raw["traffic_flow"]:
         d = d.copy()
         tcol = "timestamp_utc" if "timestamp_utc" in d.columns else "observed_at"
         d["ts"] = parse_ts(d[tcol])
         parts.append(d)
-    
+
     tf = pd.concat(parts, ignore_index=True)
 
-# Semua CSV traffic_flow yang digunakan dashboard merupakan
-# data statis yang berasal dari TomTom.
-tf["source"] = "tomtom"
+    # Semua CSV traffic_flow yang digunakan dashboard merupakan
+    # data statis yang berasal dari TomTom.
+    tf["source"] = "tomtom"
+
     for c in ["current_speed", "free_flow_speed", "current_travel_time", "free_flow_travel_time",
               "speed_ratio", "congestion_index", "delay_seconds"]:
         tf[c] = pd.to_numeric(tf[c], errors="coerce")
-    tf["speed_ratio"] = tf["speed_ratio"].fillna(tf["current_speed"] / tf["free_flow_speed"])
-    tf["congestion_index"] = tf["congestion_index"].fillna(1 - tf["speed_ratio"])
-    tf["delay_seconds"] = tf["delay_seconds"].fillna(tf["current_travel_time"] - tf["free_flow_travel_time"])
+    tf["speed_ratio"] = tf["speed_ratio"].fillna(
+        tf["current_speed"] / tf["free_flow_speed"])
+    tf["congestion_index"] = tf["congestion_index"].fillna(
+        1 - tf["speed_ratio"])
+    tf["delay_seconds"] = tf["delay_seconds"].fillna(
+        tf["current_travel_time"] - tf["free_flow_travel_time"])
     tf = tf.dropna(subset=["ts", "point_id"]).drop_duplicates(["ts", "point_id", "source"])
     tf["congestion_pct"] = tf["congestion_index"] * 100
     if "congestion_level" in tf.columns:
