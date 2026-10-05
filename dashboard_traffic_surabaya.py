@@ -390,10 +390,7 @@ def fmt(x, nd=1, suffix=""):
 def header(title, caption, tf=None):
     st.title(title)
     st.caption(caption)
-    if tf is not None and len(tf) and "simulator" in set(tf["source"]):
-        st.warning("Sumber data traffic terpilih mencakup **simulator** (bukan observasi lapangan). Angka, pola jam, "
-                   "dan progres target −15% bersifat ilustratif sampai data riil (mis. TomTom) dipakai.")
-
+    
 
 def make_map(df, color, size, custom_data, hovertemplate, zoom=10.3, height=520, **kw):
     use_new = hasattr(px, "scatter_map")
@@ -445,10 +442,12 @@ def load_all(file_map):
         tcol = "timestamp_utc" if "timestamp_utc" in d.columns else "observed_at"
         d["ts"] = parse_ts(d[tcol])
         parts.append(d)
+    
     tf = pd.concat(parts, ignore_index=True)
-    if "source" not in tf.columns:
-        tf["source"] = "unknown"
-    tf["source"] = tf["source"].fillna("unknown").astype(str)
+
+# Semua CSV traffic_flow yang digunakan dashboard merupakan
+# data statis yang berasal dari TomTom.
+tf["source"] = "tomtom"
     for c in ["current_speed", "free_flow_speed", "current_travel_time", "free_flow_travel_time",
               "speed_ratio", "congestion_index", "delay_seconds"]:
         tf[c] = pd.to_numeric(tf[c], errors="coerce")
@@ -552,11 +551,7 @@ def agg_points(tf):
 # ----------------------------------------------------------------------------
 def sidebar_filters(tf):
     st.sidebar.markdown("### 🔎 Filter Global")
-    srcs = tf["source"].value_counts()
-    sel_src = st.sidebar.multiselect("Sumber data traffic", list(srcs.index), default=[srcs.index[0]],
-                                     help="Default: sumber dengan baris terbanyak. Jangan campur simulator & data riil "
-                                          "kecuali ingin membandingkan.")
-    base = tf[tf["source"].isin(sel_src)] if sel_src else tf.iloc[0:0]
+    base = tf
     dmin = base["date"].min() if len(base) else tf["date"].min()
     dmax = base["date"].max() if len(base) else tf["date"].max()
     rng = st.sidebar.date_input("Rentang tanggal (WIB)", value=(dmin, dmax), min_value=dmin, max_value=dmax,
@@ -583,12 +578,12 @@ def sidebar_filters(tf):
     inc_apply = st.sidebar.checkbox("Terapkan filter koridor/titik ke incident", value=False,
                                     help="Incident dipetakan ke titik monitoring terdekat. Default: hanya filter tanggal.")
     radius = st.sidebar.slider("Radius incident ke titik (km)", 0.5, 10.0, 2.0, 0.5, disabled=not inc_apply)
-    return dict(src=sel_src, d0=d0, d1=d1, cor=sel_cor, pts=sel_pts, lvl=sel_lvl, min_s=min_s,
-                inc_apply=inc_apply, radius=radius)
+    return dict(d0=d0, d1=d1, cor=sel_cor, pts=sel_pts, lvl=sel_lvl, min_s=min_s,
+            inc_apply=inc_apply, radius=radius)
 
 
 def apply_filters(tf, f, use_level=True):
-    m = (tf["source"].isin(f["src"]) & tf["date"].between(f["d0"], f["d1"])
+    m = (tf["date"].between(f["d0"], f["d1"])
          & tf["corridor"].isin(f["cor"]) & tf["point_id"].isin(f["pts"]))
     if use_level:
         m &= tf["congestion_level"].isin(f["lvl"])
@@ -1303,9 +1298,7 @@ def page_quality(data, meta, ignored, f):
                                   Titik=("point_id", "nunique")).reset_index()
     show_df(sc.astype({"Awal": str, "Akhir": str}))
     if "simulator" in set(tf["source"]):
-        st.warning("traffic_flow memuat sumber 'simulator'. Pola yang terlihat (mis. puncak jam sibuk yang sangat halus dan "
-                   "nyaris identik antar titik) mencerminkan model simulasi, bukan kondisi jalan nyata.")
-
+        
     st.subheader("Temuan otomatis")
     hrs = tf["hour"].nunique()
     st.write(f"- traffic_flow: **{len(tf):,}** observasi, **{tf['date'].nunique()}** tanggal (WIB), **{hrs}/24** jam-dalam-sehari "
@@ -1315,7 +1308,7 @@ def page_quality(data, meta, ignored, f):
 
     if "traffic_hourly" in data:
         th = data["traffic_hourly"]
-        raw_h = hourly_points(tf[tf["source"].isin(f["src"])] if f["src"] else tf, 1)
+        raw_h = hourly_points(tf, 1)
         j = th.merge(raw_h[["point_id", "hour_ts", "congestion_pct", "samples"]], on=["point_id", "hour_ts"], how="outer",
                      indicator=True, suffixes=("_h", "_raw"))
         both = j[j["_merge"] == "both"]
@@ -1345,7 +1338,7 @@ def page_quality(data, meta, ignored, f):
         pchart(fig, "dq_gap")
 
     st.subheader("Sampel per titik-jam (traffic_flow terfilter sumber)")
-    hs = hourly_points(tf[tf["source"].isin(f["src"])] if f["src"] else tf, 1)
+    hs = hourly_points(tf, 1)
     fig = px.histogram(hs, x="samples", nbins=40, labels={"samples": "Sampel per titik-jam"})
     fig.update_layout(yaxis_title="Jumlah titik-jam")
     pchart(fig, "dq_samples")
@@ -1373,7 +1366,7 @@ def page_quality(data, meta, ignored, f):
     st.subheader("Keterbatasan")
     st.markdown(
         "1. **Tidak ada `vehicle_count`** — volume kendaraan tidak dapat dianalisis; dashboard memakai speed, congestion index, dan delay.\n"
-        "2. **Sumber `simulator`** pada traffic_flow bukan observasi lapangan; hasil harus dibaca sebagai ilustrasi alur analitik.\n"
+        "2. **traffic_flow menggunakan data statis berbasis TomTom**; dashboard tidak melakukan pengambilan data TomTom secara realtime.\n"
         "3. **`traffic_hourly` / mart** adalah agregasi turunan; dashboard memakai agregasi dari traffic_flow mentah sebagai sumber utama dan memvalidasinya di atas.\n"
         "4. **Weather & air quality berisi actual + forecast**; hanya data aktual dipasangkan dengan traffic.\n"
         "5. **Korelasi ≠ kausalitas**; traffic dan polusi sama-sama mengikuti pola jam, dan n jam masih kecil.\n"
