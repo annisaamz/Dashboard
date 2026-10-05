@@ -1301,8 +1301,6 @@ def page_quality(data, meta, ignored, f):
     sc = tf.groupby("source").agg(Baris=("point_id", "size"), Awal=("ts", "min"), Akhir=("ts", "max"),
                                   Titik=("point_id", "nunique")).reset_index()
     show_df(sc.astype({"Awal": str, "Akhir": str}))
-    if "simulator" in set(tf["source"]):
-        
     st.subheader("Temuan otomatis")
     hrs = tf["hour"].nunique()
     st.write(f"- traffic_flow: **{len(tf):,}** observasi, **{tf['date'].nunique()}** tanggal (WIB), **{hrs}/24** jam-dalam-sehari "
