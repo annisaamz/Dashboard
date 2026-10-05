@@ -58,17 +58,260 @@ ENV_LABELS = {
 st.markdown(
     """
 <style>
-.stApp {background:#f8fafc;}
-.block-container {padding-top:1.4rem; max-width:1500px;}
-section[data-testid="stSidebar"] {background:#ffffff; border-right:1px solid #e2e8f0;}
-h1,h2,h3 {color:#0f172a;}
-.kpi {background:#ffffff; border:1px solid #e2e8f0; border-left:5px solid #2563eb; border-radius:10px;
-      padding:12px 14px; box-shadow:0 1px 3px rgba(15,23,42,.06); min-height:98px;}
-.kpi-label {color:#64748b; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; font-weight:600;}
-.kpi-value {color:#0f172a; font-size:1.55rem; font-weight:700; line-height:1.3;}
-.kpi-sub {color:#94a3b8; font-size:.75rem;}
-.insight {background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:10px 18px; color:#1e3a8a;}
-.insight li {margin:3px 0;}
+
+/* =========================================================
+   GLOBAL LIGHT THEME
+   ========================================================= */
+
+.stApp {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+.block-container {
+    padding-top: 1.4rem;
+    max-width: 1500px;
+}
+
+
+/* =========================================================
+   GLOBAL TEXT
+   ========================================================= */
+
+h1, h2, h3, h4, h5, h6 {
+    color: #0f172a !important;
+}
+
+p {
+    color: #0f172a;
+}
+
+/* Markdown text */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span {
+    color: #0f172a;
+}
+
+/* Caption */
+[data-testid="stCaptionContainer"],
+[data-testid="stCaptionContainer"] p {
+    color: #64748b !important;
+}
+
+
+/* =========================================================
+   SIDEBAR
+   ========================================================= */
+
+section[data-testid="stSidebar"] {
+    background-color: #ffffff !important;
+    border-right: 1px solid #e2e8f0;
+}
+
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3,
+section[data-testid="stSidebar"] h4,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span {
+    color: #0f172a !important;
+}
+
+
+/* Sidebar radio */
+section[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    color: #0f172a !important;
+}
+
+
+/* Sidebar selectbox / multiselect */
+section[data-testid="stSidebar"] [data-baseweb="select"] {
+    color: #0f172a !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="select"] * {
+    color: #0f172a !important;
+}
+
+
+/* Sidebar slider */
+section[data-testid="stSidebar"] [data-testid="stSlider"] {
+    color: #0f172a !important;
+}
+
+
+/* Sidebar checkbox */
+section[data-testid="stSidebar"] [data-testid="stCheckbox"] label {
+    color: #0f172a !important;
+}
+
+
+/* =========================================================
+   INPUT / WIDGET
+   ========================================================= */
+
+[data-baseweb="select"] {
+    background-color: #ffffff !important;
+}
+
+[data-baseweb="select"] * {
+    color: #0f172a !important;
+}
+
+input,
+textarea {
+    color: #0f172a !important;
+    background-color: #ffffff !important;
+}
+
+
+/* =========================================================
+   KPI CARDS
+   ========================================================= */
+
+.kpi {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0;
+    border-left: 5px solid #2563eb;
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 3px rgba(15,23,42,.06);
+    min-height: 98px;
+}
+
+.kpi-label {
+    color: #64748b !important;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    font-weight: 600;
+}
+
+.kpi-value {
+    color: #0f172a !important;
+    font-size: 1.55rem;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.kpi-sub {
+    color: #94a3b8 !important;
+    font-size: .75rem;
+}
+
+
+/* =========================================================
+   INSIGHT BOX
+   ========================================================= */
+
+.insight {
+    background: #eff6ff !important;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 10px 18px;
+    color: #1e3a8a !important;
+}
+
+.insight li,
+.insight p,
+.insight span {
+    color: #1e3a8a !important;
+}
+
+
+/* =========================================================
+   STREAMLIT ALERTS
+   ========================================================= */
+
+/* Info */
+[data-testid="stAlert"] {
+    color: #0f172a !important;
+}
+
+[data-testid="stAlert"] p,
+[data-testid="stAlert"] span {
+    color: inherit !important;
+}
+
+
+/* =========================================================
+   METRICS
+   ========================================================= */
+
+[data-testid="stMetricLabel"] {
+    color: #64748b !important;
+}
+
+[data-testid="stMetricValue"] {
+    color: #0f172a !important;
+}
+
+[data-testid="stMetricDelta"] {
+    color: #475569 !important;
+}
+
+
+/* =========================================================
+   TABS
+   ========================================================= */
+
+button[data-baseweb="tab"] {
+    color: #475569 !important;
+}
+
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #2563eb !important;
+}
+
+
+/* =========================================================
+   EXPANDER
+   ========================================================= */
+
+[data-testid="stExpander"] {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0;
+}
+
+[data-testid="stExpander"] summary {
+    color: #0f172a !important;
+}
+
+[data-testid="stExpander"] summary span {
+    color: #0f172a !important;
+}
+
+
+/* =========================================================
+   DATAFRAME / TABLE
+   ========================================================= */
+
+[data-testid="stDataFrame"] {
+    background-color: #ffffff !important;
+}
+
+
+/* =========================================================
+   BUTTON
+   ========================================================= */
+
+.stButton button {
+    color: #0f172a !important;
+    background-color: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+
+/* =========================================================
+   PROGRESS BAR
+   ========================================================= */
+
+[data-testid="stProgress"] {
+    color: #2563eb !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
